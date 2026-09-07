@@ -1,0 +1,13 @@
+# Build output (unanchored, so this also covers MyFirstMod.Tests/bin, MyFirstMod.Tests/obj, etc.)
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Local, machine-specific Claude Code settings: contains this machine's absolute Steam/Stardew Valley
+# install path and this session's temp scratchpad paths, neither of which resolve on another machine.
+# (Claude Code's own convention: settings.local.json is per-user/local by design, unlike settings.json.)
+.claude/settings.local.json

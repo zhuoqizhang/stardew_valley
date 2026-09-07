@@ -1,0 +1,10 @@
+{
+  "Name": "MyFirstMod",
+  "Author": "zhzhuoqi",
+  "Version": "1.0.0",
+  "Description": "My first SMAPI mod.",
+  "UniqueID": "zhzhuoqi.MyFirstMod",
+  "EntryDll": "MyFirstMod.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": []
+}

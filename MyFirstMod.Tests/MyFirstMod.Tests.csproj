@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Links the pure SettlementMath.cs source file from the main mod project instead of a
+    ProjectReference to MyFirstMod.csproj. MyFirstMod.csproj needs Harmony/SMAPI/StardewValley
+    assemblies (via Pathoschild.Stardew.ModBuildConfig) to build - dependencies a plain unit-test
+    project shouldn't need to resolve just to test pure money math. SettlementMath.cs itself has
+    zero such dependencies (see its own header comment), so linking just that file keeps this
+    project buildable/testable without a game install.
+  -->
+  <ItemGroup>
+    <Compile Include="..\SettlementMath.cs" Link="SettlementMath.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.1.0" />
+    <PackageReference Include="xunit" Version="2.4.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.3">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="3.1.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

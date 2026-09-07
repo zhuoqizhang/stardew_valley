@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    MyFirstMod.Tests lives in a subfolder of this project directory, so the SDK's default recursive
+    **/*.cs glob would otherwise try to compile the test project's files (and its Xunit types) into
+    this mod DLL too. Exclude it explicitly; MyFirstMod.Tests.csproj builds separately and links only
+    the specific pure-logic files it needs (see its own .csproj comment).
+  -->
+  <ItemGroup>
+    <Compile Remove="MyFirstMod.Tests\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" />
+    <!-- Compile-only: SMAPI already loads its own bundled 0Harmony.dll at runtime, so we must not ship a copy. -->
+    <PackageReference Include="Lib.Harmony" Version="2.2.2" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>
