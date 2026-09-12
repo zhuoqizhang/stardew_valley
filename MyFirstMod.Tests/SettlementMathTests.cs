@@ -123,5 +123,29 @@ namespace MyFirstMod.Tests
         {
             Assert.Equal(expectedMargin, SettlementMath.ComputeMargin(agreedPrice));
         }
+
+        // ---- Scenario 7: plan.md 5.5's 2026-09-13 clarification - margin is a prepayment of AgreedPrice,
+        // not an independent bonus. Delivery must pay AgreedPrice minus the margin already paid at signing,
+        // not the full AgreedPrice (which would let the player net AgreedPrice + Margin overall). ----
+        [Theory]
+        [InlineData(450, 45, 405)]
+        [InlineData(200, 20, 180)]
+        public void ComputeDeliveryPayout_SubtractsMarginFromAgreedPrice(int agreedPrice, int margin, int expectedPayout)
+        {
+            Assert.Equal(expectedPayout, SettlementMath.ComputeDeliveryPayout(agreedPrice, margin));
+        }
+
+        [Fact]
+        public void ComputeDeliveryPayout_PlusMarginAlreadyPaid_EqualsAgreedPrice()
+        {
+            // The whole point of the margin-as-prepayment model: margin paid at signing + payout paid at
+            // delivery must sum to exactly AgreedPrice - not AgreedPrice + Margin (the bug this fixes).
+            int agreedPrice = 300;
+            int margin = SettlementMath.ComputeMargin(agreedPrice);
+
+            int payout = SettlementMath.ComputeDeliveryPayout(agreedPrice, margin);
+
+            Assert.Equal(agreedPrice, margin + payout);
+        }
     }
 }

@@ -28,14 +28,6 @@ namespace MyFirstMod
         private const int RowHeight = 96;
         private const int IconSlotSize = 64;
 
-        // Fixed placeholder prices until a real market-price module exists.
-        private const int PlaceholderAgreedPrice = 45;
-
-        // Vanilla Pale Ale's own base sell price (Data/Objects id 303), not an arbitrary placeholder -
-        // confirmed by loading Data/Objects directly (ObjectData.Price = 300), same way PaleAleItemId
-        // itself was confirmed in ContractManager.
-        private const int PlaceholderPaleAleAgreedPrice = 300;
-
         private const int TabButtonWidth = 200;
         private const int TabButtonHeight = 64;
         private const int DeliveryRowHeight = 68;
@@ -63,6 +55,29 @@ namespace MyFirstMod
         private bool isPaleAleTestRowHovered;
         private bool isBeerTestRowHovered;
         private string clickFeedbackText = "";
+
+        /// <summary>
+        /// True while waiting for the host to respond to a RequestSignContractMessage (plan.md section 7,
+        /// farmhand signing flow) - blocks further sign clicks so a farmhand can't queue up multiple
+        /// requests before the first one's confirmation arrives. Never set for the host's own click, since
+        /// SignContractAsHost resolves synchronously (see the *Contract methods below).
+        /// </summary>
+        private bool isPendingSignRequest;
+
+        /// <summary>
+        /// True while waiting for the host to respond to a RequestDeliverMessage (plan.md section 7,
+        /// farmhand delivery flow, "方案1预先锁定式验证") - blocks further delivery clicks so a farmhand
+        /// can't fire off multiple concurrent requests before the first one resolves. Never set for the
+        /// host's own click, which resolves synchronously (see OnInventoryItemClicked).
+        /// </summary>
+        private bool isPendingDeliveryRequest;
+
+        /// <summary>Which item a farmhand's in-flight RequestDeliverMessage was for - needed at DeliverApproved time to find a fresh matching stack, since the original click's x/y may no longer point at the same item by the time the host's reply arrives.</summary>
+        private string pendingDeliveryItemId;
+
+        /// <summary>Original click position for the in-flight delivery request, reused for the debris animation's origin once approved - see OnDeliverApprovedReceived.</summary>
+        private int pendingDeliveryClickX;
+        private int pendingDeliveryClickY;
 
         public FuturesMenu(IMonitor monitor, ContractManager contractManager)
             : base(
@@ -123,6 +138,121 @@ namespace MyFirstMod
             int inventoryX = xPositionOnScreen + (width - 64 * 12) / 2;
             int inventoryY = deliveryListBounds.Bottom + 24;
             this.deliveryInventoryMenu = new InventoryMenu(inventoryX, inventoryY, playerInventory: true, highlightMethod: HighlightDeliverableItem);
+
+            // Plan.md section 7: fires once a signed contract (this client's own host-side signing, or a
+            // farmhand's request the host just confirmed) is applied to local state, letting this menu clear
+            // its "waiting for host" feedback and show the real price/margin regardless of which flow
+            // produced it. Unsubscribed in cleanupBeforeExit so a closed menu doesn't linger as a listener.
+            this.contractManager.ContractSignedApplied += OnContractSignedApplied;
+
+            // Plan.md section 7 delivery flow: fire on the requester's own client once the host replies to
+            // a RequestDeliverMessage. Also unsubscribed in cleanupBeforeExit.
+            this.contractManager.DeliverApprovedReceived += OnDeliverApprovedReceived;
+            this.contractManager.DeliverRejectedReceived += OnDeliverRejectedReceived;
+        }
+
+        /// <summary>Unsubscribes from ContractManager's events so a closed menu instance doesn't keep receiving them for the lifetime of the ContractManager (which outlives any single menu open/close).</summary>
+        protected override void cleanupBeforeExit()
+        {
+            contractManager.ContractSignedApplied -= OnContractSignedApplied;
+            contractManager.DeliverApprovedReceived -= OnDeliverApprovedReceived;
+            contractManager.DeliverRejectedReceived -= OnDeliverRejectedReceived;
+            base.cleanupBeforeExit();
+        }
+
+        /// <summary>
+        /// Shared confirmation handler for both signing flows (plan.md section 7): the host's own click
+        /// resolves synchronously through SignContractAsHost, and a farmhand's click resolves asynchronously
+        /// once the host's ContractSignedMessage broadcast arrives - either way, this is what clears the
+        /// "waiting" state and shows the real price/margin. Note: since contracts aren't attributed to a
+        /// specific signer (plan.md section 7 - no PlayerId-based filtering), if another player signs a
+        /// contract while THIS client also has a request in flight, this could clear the waiting state and
+        /// show feedback for that unrelated contract instead of this client's own - a known cosmetic-only
+        /// limitation (no money/inventory correctness is affected either way), not fixed in this phase.
+        /// </summary>
+        private void OnContractSignedApplied(FuturesContract contract)
+        {
+            isPendingSignRequest = false;
+
+            string itemName = GetItemDisplayName(contract.ItemId);
+            int countInGroup = contractManager.CountPending(contract.ItemId, contract.DueDate);
+
+            clickFeedbackText = $"签约成功：{itemName} x1 @ {contract.AgreedPrice}G，获得保证金{contract.Margin}G（同批已签{countInGroup}单）";
+            monitor?.Log($"FuturesMenu: contract [{contract.ContractId}] confirmed signed, cleared pending state.", LogLevel.Info);
+        }
+
+        /// <summary>
+        /// Plan.md section 7 delivery flow: the host approved this farmhand's RequestDeliverMessage. Does
+        /// the actual consumption here rather than at request time - re-finds a fresh matching stack by
+        /// pendingDeliveryItemId (not the original click's x/y, which may be stale by now) and defensively
+        /// re-checks it still exists, since time has passed since the original click (network round-trip).
+        /// If the item is gone, reports DeliverFailed instead of touching money/inventory - the host then
+        /// releases its lock for the next requester in line.
+        /// </summary>
+        private void OnDeliverApprovedReceived(DeliverApprovedMessage message)
+        {
+            isPendingDeliveryRequest = false;
+
+            Item item = FindFirstStackOfItem(pendingDeliveryItemId);
+            if (item == null)
+            {
+                contractManager.ReportDeliverFailed(message.ContractId);
+                clickFeedbackText = "交割失败：物品已不在背包中";
+                monitor?.Log($"FuturesMenu: approved delivery [{message.ContractId}] but item={pendingDeliveryItemId} is no longer in inventory - reported DeliverFailed.", LogLevel.Warn);
+                return;
+            }
+
+            int slotIndex = Game1.player.Items.IndexOf(item);
+            Game1.player.Items[slotIndex] = item.ConsumeStack(1);
+
+            // Plan.md 5.5 (margin-as-prepayment): margin was already paid to the player at signing, so
+            // delivery pays the remainder, not the full agreed price. Margin isn't transmitted on the wire
+            // anywhere (not in DeliverApprovedMessage, not in FuturesContractSaveData) - it's always this
+            // same deterministic function of agreedPrice, recomputed locally here exactly like every other
+            // client (including the contract's original signer) computed it.
+            int margin = SettlementMath.ComputeMargin(message.AgreedPrice);
+            int payout = SettlementMath.ComputeDeliveryPayout(message.AgreedPrice, margin);
+            Game1.player.Money += payout;
+
+            contractManager.ConfirmDeliver(message.ContractId);
+
+            Game1.playSound("sell");
+            SpawnDeliveryDebris(pendingDeliveryClickX, pendingDeliveryClickY);
+
+            clickFeedbackText = $"交割成功：{GetItemDisplayName(pendingDeliveryItemId)} @ {payout}G（合约价{message.AgreedPrice}G，已扣除签约时预付的保证金{margin}G）";
+            monitor?.Log($"FuturesMenu: delivered contract [{message.ContractId}] item={pendingDeliveryItemId} agreedPrice={message.AgreedPrice}G margin={margin}G payout={payout}G", LogLevel.Info);
+        }
+
+        /// <summary>Plan.md section 7 delivery flow: the host rejected this farmhand's RequestDeliverMessage - nothing eligible to deliver (none due today for that item, or someone else just claimed the last one). No inventory/money was ever touched.</summary>
+        private void OnDeliverRejectedReceived(DeliverRejectedMessage message)
+        {
+            isPendingDeliveryRequest = false;
+            clickFeedbackText = "暂无可交割合约";
+            monitor?.Log($"FuturesMenu: delivery request for item={message.ItemId} rejected by host ({message.Reason}).", LogLevel.Info);
+        }
+
+        /// <summary>Finds the first inventory stack containing at least 1 of itemId - used at DeliverApproved time instead of the original click's slot, since a fresh lookup by id is the only reliable way to find the item after a network round-trip may have reshuffled/consumed stacks.</summary>
+        private static Item FindFirstStackOfItem(string itemId)
+        {
+            foreach (Item item in Game1.player.Items)
+            {
+                if (item != null && item.ItemId == itemId && item.Stack > 0)
+                {
+                    return item;
+                }
+            }
+
+            return null;
+        }
+
+        private Item GetItem(string itemId)
+        {
+            return itemId == ContractManager.BeerItemId ? beerItem : paleAleItem;
+        }
+
+        private string GetItemDisplayName(string itemId)
+        {
+            return GetItem(itemId)?.DisplayName ?? itemId;
         }
 
         public override void draw(SpriteBatch b)
@@ -205,7 +335,7 @@ namespace MyFirstMod
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
             Utility.drawTextWithShadow(b, nameText, Game1.smallFont, namePosition, Game1.textColor);
 
-            string priceText = "??? G";
+            string priceText = $"{ContractManager.GetNativeSellPrice(ContractManager.BeerItemId)}G";
             Vector2 priceSize = Game1.smallFont.MeasureString(priceText);
             Vector2 pricePosition = new Vector2(bounds.Right - 16 - priceSize.X, bounds.Y + (bounds.Height - priceSize.Y) / 2f);
             Utility.drawTextWithShadow(b, priceText, Game1.smallFont, pricePosition, Game1.textColor);
@@ -233,7 +363,7 @@ namespace MyFirstMod
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
             Utility.drawTextWithShadow(b, nameText, Game1.smallFont, namePosition, Game1.textColor);
 
-            string priceText = "??? G";
+            string priceText = $"{ContractManager.GetNativeSellPrice(ContractManager.PaleAleItemId)}G";
             Vector2 priceSize = Game1.smallFont.MeasureString(priceText);
             Vector2 pricePosition = new Vector2(bounds.Right - 16 - priceSize.X, bounds.Y + (bounds.Height - priceSize.Y) / 2f);
             Utility.drawTextWithShadow(b, priceText, Game1.smallFont, pricePosition, Game1.textColor);
@@ -262,7 +392,7 @@ namespace MyFirstMod
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
             Utility.drawTextWithShadow(b, nameText, Game1.smallFont, namePosition, Game1.textColor);
 
-            string priceText = "??? G";
+            string priceText = $"{ContractManager.GetNativeSellPrice(ContractManager.PaleAleItemId)}G";
             Vector2 priceSize = Game1.smallFont.MeasureString(priceText);
             Vector2 pricePosition = new Vector2(bounds.Right - 16 - priceSize.X, bounds.Y + (bounds.Height - priceSize.Y) / 2f);
             Utility.drawTextWithShadow(b, priceText, Game1.smallFont, pricePosition, Game1.textColor);
@@ -291,13 +421,13 @@ namespace MyFirstMod
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
             Utility.drawTextWithShadow(b, nameText, Game1.smallFont, namePosition, Game1.textColor);
 
-            string priceText = "??? G";
+            string priceText = $"{ContractManager.GetNativeSellPrice(ContractManager.BeerItemId)}G";
             Vector2 priceSize = Game1.smallFont.MeasureString(priceText);
             Vector2 pricePosition = new Vector2(bounds.Right - 16 - priceSize.X, bounds.Y + (bounds.Height - priceSize.Y) / 2f);
             Utility.drawTextWithShadow(b, priceText, Game1.smallFont, pricePosition, Game1.textColor);
         }
 
-        /// <summary>One merged preview row: N Pending contracts that share (ItemId, DueDate) and, for today's rows, the same deliverable/queued status (design doc 8.2 "列表展示的合并规则").</summary>
+        /// <summary>One merged preview row: N Pending contracts that share (ItemId, DueDate) and, for today's rows, the same deliverable/queued status (design doc 10.2 "列表展示的合并规则").</summary>
         private class DeliveryRowGroup
         {
             public string ItemId;
@@ -346,6 +476,14 @@ namespace MyFirstMod
             }
 
             deliveryInventoryMenu.draw(b);
+
+            if (!string.IsNullOrEmpty(clickFeedbackText))
+            {
+                Vector2 feedbackPosition = new Vector2(
+                    deliveryInventoryMenu.xPositionOnScreen,
+                    deliveryInventoryMenu.yPositionOnScreen + deliveryInventoryMenu.height + 12);
+                Utility.drawTextWithShadow(b, clickFeedbackText, Game1.smallFont, feedbackPosition, Color.DarkGreen);
+            }
 
             if (!string.IsNullOrEmpty(deliveryInventoryMenu.hoverText))
             {
@@ -553,6 +691,13 @@ namespace MyFirstMod
 
             if (currentTab == Tab.TradeFutures)
             {
+                if (isPendingSignRequest)
+                {
+                    // A farmhand's sign request is still waiting on the host - ignore further clicks
+                    // entirely (no sound, no re-request) rather than letting them queue up.
+                    return;
+                }
+
                 if (beerRowComponent.bounds.Contains(x, y))
                 {
                     SignBeerContract();
@@ -596,90 +741,116 @@ namespace MyFirstMod
             }
         }
 
-        /// <summary>Signs a new placeholder contract per click; ContractManager owns the actual signing and quest-log sync.</summary>
+        /// <summary>
+        /// Plan.md section 7 ("方案B请求-审批式"): the host resolves signing synchronously (no local state
+        /// exists to create ahead of time, so there's nothing to show the player yet beyond "requesting");
+        /// a farmhand sends a request and waits - OnContractSignedApplied fills in the real feedback text
+        /// once the host's confirmation arrives. Shared by all four sign buttons below.
+        /// </summary>
+        private void SignContract(string itemId, ContractDueDateKind dueDateKind, string itemDisplayNameForFeedback)
+        {
+            if (isPendingSignRequest)
+            {
+                return;
+            }
+
+            if (Context.IsMainPlayer)
+            {
+                contractManager.SignContractAsHost(itemId, dueDateKind, Game1.player.UniqueMultiplayerID);
+                // OnContractSignedApplied already fired synchronously by this point and set clickFeedbackText.
+            }
+            else
+            {
+                isPendingSignRequest = true;
+                clickFeedbackText = $"已发送签约请求（{itemDisplayNameForFeedback}），等待房主确认...";
+                contractManager.RequestSignContract(itemId, dueDateKind);
+            }
+        }
+
+        /// <summary>Beer row click: normal GetNextNextFriday() due date.</summary>
         private void SignBeerContract()
         {
-            SDate signedDate = SDate.Now();
-            FuturesContract contract = contractManager.SignContract(ContractManager.BeerItemId, PlaceholderAgreedPrice, signedDate, dueDate);
-            int countInGroup = contractManager.CountPending(contract.ItemId, dueDate);
-
-            clickFeedbackText = $"已点击：拟签约 啤酒 x1 @ {contract.AgreedPrice}G，获得保证金{contract.Margin}G（同批已签{countInGroup}单）";
-            monitor?.Log("FuturesMenu: beer row clicked, delegating to ContractManager.SignContract.", LogLevel.Info);
+            SignContract(ContractManager.BeerItemId, ContractDueDateKind.NextNextFriday, "啤酒");
         }
 
-        /// <summary>Signs a new placeholder Pale Ale contract with the normal GetNextNextFriday() due date; same flow as SignBeerContract, just a different item/price.</summary>
+        /// <summary>Pale Ale row click: normal GetNextNextFriday() due date.</summary>
         private void SignPaleAleContract()
         {
-            SDate signedDate = SDate.Now();
-            FuturesContract contract = contractManager.SignContract(ContractManager.PaleAleItemId, PlaceholderPaleAleAgreedPrice, signedDate, dueDate);
-            int countInGroup = contractManager.CountPending(contract.ItemId, dueDate);
-
-            clickFeedbackText = $"已点击：拟签约 淡啤酒 x1 @ {contract.AgreedPrice}G，获得保证金{contract.Margin}G（同批已签{countInGroup}单）";
-            monitor?.Log("FuturesMenu: pale ale row clicked, delegating to ContractManager.SignContract.", LogLevel.Info);
+            SignContract(ContractManager.PaleAleItemId, ContractDueDateKind.NextNextFriday, "淡啤酒");
         }
 
-        /// <summary>Test-only entry point: same signing flow as SignPaleAleContract, but the due date is "signed day + 1" instead of GetNextNextFriday(), so a delivery can be tested the very next day.</summary>
+        /// <summary>Test-only Pale Ale row click: due date is "signed day + 1" instead of GetNextNextFriday(), so a delivery can be tested the very next day.</summary>
         private void SignPaleAleTestContract()
         {
-            SDate signedDate = SDate.Now();
-            SDate testDueDate = signedDate.AddDays(1);
-            FuturesContract contract = contractManager.SignContract(ContractManager.PaleAleItemId, PlaceholderPaleAleAgreedPrice, signedDate, testDueDate);
-            int countInGroup = contractManager.CountPending(contract.ItemId, testDueDate);
-
-            clickFeedbackText = $"已点击：拟签约 淡啤酒（测试，明日到期）x1 @ {contract.AgreedPrice}G，获得保证金{contract.Margin}G（同批已签{countInGroup}单）";
-            monitor?.Log("FuturesMenu: pale ale TEST row clicked, delegating to ContractManager.SignContract.", LogLevel.Info);
+            SignContract(ContractManager.PaleAleItemId, ContractDueDateKind.SignedDatePlusOneDay, "淡啤酒（测试）");
         }
 
-        /// <summary>Test-only entry point: same signing flow as SignBeerContract, but the due date is "signed day + 1" instead of GetNextNextFriday(), so a delivery/default can be tested the very next day - alongside SignPaleAleTestContract, to test a same-night, multi-item default batch.</summary>
+        /// <summary>Test-only Beer row click: due date is "signed day + 1", same purpose as SignPaleAleTestContract - lets a same-night, multi-item default/delivery batch be tested.</summary>
         private void SignBeerTestContract()
         {
-            SDate signedDate = SDate.Now();
-            SDate testDueDate = signedDate.AddDays(1);
-            FuturesContract contract = contractManager.SignContract(ContractManager.BeerItemId, PlaceholderAgreedPrice, signedDate, testDueDate);
-            int countInGroup = contractManager.CountPending(contract.ItemId, testDueDate);
-
-            clickFeedbackText = $"已点击：拟签约 啤酒（测试，明日到期）x1 @ {contract.AgreedPrice}G，获得保证金{contract.Margin}G（同批已签{countInGroup}单）";
-            monitor?.Log("FuturesMenu: beer TEST row clicked, delegating to ContractManager.SignContract.", LogLevel.Info);
+            SignContract(ContractManager.BeerItemId, ContractDueDateKind.SignedDatePlusOneDay, "啤酒（测试）");
         }
 
         /// <summary>
-        /// Design doc 8.2's delivery interaction: clicking an inventory item fulfills the oldest-signed
-        /// Pending contract due today for that item variety, deducting exactly one unit. This deliberately
-        /// never calls InventoryMenu.leftClick/rightClick - those pick up a whole stack or half-stack to
-        /// carry on the cursor, which doesn't match "always consume exactly 1" - so item lookup goes
-        /// through the read-only getItemAt/getInventoryPositionOfClick, and the stack is trimmed by hand
-        /// via Item.ConsumeStack(1), the same primitive InventoryMenu.rightClick itself uses internally.
+        /// Design doc 10.2's delivery interaction, now host-authoritative (plan.md section 7, "方案1预先锁定
+        /// 式验证"): clicking an inventory item never fulfills a contract directly - only host FIFO
+        /// arbitration (TryLockNextDeliverableContractAsHost) decides which contract a delivery counts
+        /// against. The host's own click resolves synchronously (no network round-trip, same pattern as
+        /// SignContract's host branch); a farmhand's click sends RequestDeliverMessage and waits for
+        /// OnDeliverApprovedReceived/OnDeliverRejectedReceived. This deliberately never calls
+        /// InventoryMenu.leftClick/rightClick - those pick up a whole stack or half-stack to carry on the
+        /// cursor, which doesn't match "always consume exactly 1" - so item lookup goes through the
+        /// read-only getItemAt, and the stack is trimmed by hand via Item.ConsumeStack(1), the same
+        /// primitive InventoryMenu.rightClick itself uses internally.
         /// </summary>
         private void OnInventoryItemClicked(int x, int y)
         {
+            if (isPendingDeliveryRequest)
+            {
+                return;
+            }
+
             Item item = deliveryInventoryMenu.getItemAt(x, y);
             if (item == null)
             {
                 return;
             }
 
-            SDate today = SDate.Now();
-            FuturesContract contract = contractManager.Contracts
-                .Where(c => c.Status == ContractStatus.Pending && c.ItemId == item.ItemId && c.DueDate.Equals(today))
-                .OrderBy(c => c.SignedDate.DaysSinceStart)
-                .FirstOrDefault();
-
-            if (contract == null)
+            if (Context.IsMainPlayer)
             {
-                return;
+                if (contractManager.TryLockNextDeliverableContractAsHost(item.ItemId, out string contractId, out int agreedPrice))
+                {
+                    int slotIndex = deliveryInventoryMenu.getInventoryPositionOfClick(x, y);
+                    IList<Item> items = deliveryInventoryMenu.actualInventory;
+                    items[slotIndex] = item.ConsumeStack(1);
+
+                    // Plan.md 5.5 (margin-as-prepayment): margin was already paid to the player at
+                    // signing, so delivery pays the remainder, not the full agreed price.
+                    int margin = SettlementMath.ComputeMargin(agreedPrice);
+                    int payout = SettlementMath.ComputeDeliveryPayout(agreedPrice, margin);
+                    Game1.player.Money += payout;
+                    contractManager.HandleDeliverConfirmedAsHost(contractId);
+
+                    Game1.playSound("sell");
+                    SpawnDeliveryDebris(x, y);
+
+                    clickFeedbackText = $"交割成功：{GetItemDisplayName(item.ItemId)} @ {payout}G（合约价{agreedPrice}G，已扣除签约时预付的保证金{margin}G）";
+                    monitor?.Log($"FuturesMenu: [HOST] delivered contract [{contractId}] item={item.ItemId} agreedPrice={agreedPrice}G margin={margin}G payout={payout}G", LogLevel.Info);
+                }
+                else
+                {
+                    clickFeedbackText = "暂无可交割合约";
+                }
             }
-
-            int slotIndex = deliveryInventoryMenu.getInventoryPositionOfClick(x, y);
-            IList<Item> items = deliveryInventoryMenu.actualInventory;
-            items[slotIndex] = item.ConsumeStack(1);
-
-            Game1.player.Money += contract.AgreedPrice;
-            contractManager.FulfillContract(contract);
-
-            Game1.playSound("sell");
-            SpawnDeliveryDebris(x, y);
-
-            monitor?.Log($"FuturesMenu: delivered contract [{contract.ContractId}] item={contract.ItemId} price={contract.AgreedPrice}G", LogLevel.Info);
+            else
+            {
+                isPendingDeliveryRequest = true;
+                pendingDeliveryItemId = item.ItemId;
+                pendingDeliveryClickX = x;
+                pendingDeliveryClickY = y;
+                clickFeedbackText = $"已发送交割请求（{GetItemDisplayName(item.ItemId)}），等待房主确认...";
+                contractManager.RequestDeliver(item.ItemId);
+            }
         }
 
         /// <summary>Same "TileSheets\debris" particle burst ShopMenu uses on a sell-click, reused here for visual consistency.</summary>

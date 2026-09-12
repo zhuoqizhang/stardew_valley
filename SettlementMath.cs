@@ -33,6 +33,21 @@ namespace MyFirstMod
         }
 
         /// <summary>
+        /// Design doc 5.5 (2026-09-13 clarification: margin is a prepayment of part of the agreed price,
+        /// not an independent bonus kept on top): a successfully delivered contract pays the agreed price
+        /// MINUS the margin already paid to the player at signing (SignContractAsHost), so the two payouts
+        /// together - margin now, this at delivery - sum to exactly AgreedPrice, never more. Deliberately
+        /// takes margin as a parameter rather than recomputing ComputeMargin(agreedPrice) internally,
+        /// mirroring ComputeDefaultDeduction's own style - the caller already has (or can cheaply derive)
+        /// margin, so there's one obvious place callers get it from rather than two ways to compute the
+        /// same number.
+        /// </summary>
+        public static int ComputeDeliveryPayout(int agreedPrice, int margin)
+        {
+            return agreedPrice - margin;
+        }
+
+        /// <summary>
         /// Design doc 5.4/5.5 default-settlement deduction: forfeits the margin (paid TO the player by
         /// Pierre at signing, not held in escrow) plus the price-gap penalty. The two are summed into one
         /// total BEFORE clamping to the player's current money - deliberately not two separate

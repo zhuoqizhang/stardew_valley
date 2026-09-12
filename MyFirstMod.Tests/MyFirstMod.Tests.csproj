@@ -9,15 +9,22 @@
   </PropertyGroup>
 
   <!--
-    Links the pure SettlementMath.cs source file from the main mod project instead of a
+    Links the pure SettlementMath.cs/PriceModel.cs source files from the main mod project instead of a
     ProjectReference to MyFirstMod.csproj. MyFirstMod.csproj needs Harmony/SMAPI/StardewValley
     assemblies (via Pathoschild.Stardew.ModBuildConfig) to build - dependencies a plain unit-test
-    project shouldn't need to resolve just to test pure money math. SettlementMath.cs itself has
-    zero such dependencies (see its own header comment), so linking just that file keeps this
+    project shouldn't need to resolve just to test pure logic. SettlementMath.cs/PriceModel.cs have
+    zero such dependencies (see their own header comments), so linking just those files keeps this
     project buildable/testable without a game install.
+
+    DateHelper.cs (and its ContractDueDateKind/ResolveDueDate) is deliberately NOT linked here: it
+    needs StardewModdingAPI.Utilities.SDate, which would require hardcoded machine-specific
+    <Reference> HintPaths to the game install and break the "any machine can build this" property
+    above. Tried once (2026-09-11) and reverted at the user's request - ResolveDueDate's own logic is
+    a two-line switch reviewable by eye, not worth that tradeoff.
   -->
   <ItemGroup>
     <Compile Include="..\SettlementMath.cs" Link="SettlementMath.cs" />
+    <Compile Include="..\PriceModel.cs" Link="PriceModel.cs" />
   </ItemGroup>
 
   <ItemGroup>
