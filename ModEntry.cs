@@ -212,9 +212,11 @@ namespace MyFirstMod
             // "rng" (a plain, unsynchronized System.Random - see the "rng" field above) to decide the shared
             // layer-5 jump event; if every client called it with their own independently-advancing Random,
             // each client would compute a DIFFERENT simulated price for the same day. Gating on
-            // Context.IsMainPlayer keeps this authoritative-once-per-session, same as SettleDefaults. Plan.md
-            // section 6 already notes this history doesn't feed GetMarketPrice yet; now it also doesn't run
-            // on farmhands at all - their price history stays empty until plan.md section 7's sync exists.
+            // Context.IsMainPlayer keeps this authoritative-once-per-session, same as SettleDefaults. Since
+            // plan.md 6.6's switch this feeds GetMarketPrice directly, so a divergent price here would mean
+            // a divergent default-settlement penalty too - not just a cosmetic history mismatch. Host-only
+            // execution is no longer a farmhand-visibility gap either: plan.md section 7's full-state sync
+            // (ContractStateSyncMessage) broadcasts the host's price history to every client after this runs.
             if (Context.IsMainPlayer)
             {
                 contractManager.UpdateDailyPrices(SDate.Now(), rng);

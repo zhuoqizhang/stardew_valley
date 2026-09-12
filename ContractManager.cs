@@ -643,14 +643,36 @@ namespace MyFirstMod
         }
 
         /// <summary>
-        /// Transitional implementation (plan.md 6.6): until PriceModel's daily update (see
-        /// <see cref="UpdateDailyPrices"/>) is verified and the user explicitly asks for the switch, this
-        /// returns the item's actual native sell price straight from ItemRegistry rather than any
-        /// placeholder or simulated value - so default-settlement math (SettleDefaults) never mixes a
-        /// half-simulated price with real gold consequences.
+        /// Plan.md 6.6 (2026-09-14: price engine switched on): the "market price" SettleDefaults' price-gap
+        /// penalty (design doc 1.2) is computed against - now the most recent entry in
+        /// BeerPriceHistory/PaleAlePriceHistory (today's PriceModel-simulated price, appended once per day
+        /// by <see cref="UpdateDailyPrices"/>), not the item's fixed native sell price.
+        ///
+        /// Falls back to GetNativeSellPrice if that item's history is still empty - this shouldn't normally
+        /// happen (UpdateDailyPrices runs on every DayStarted, strictly before any DayEnding settlement
+        /// could see that day's contracts as due), but a brand-new save/host whose very first day somehow
+        /// reaches a default before its first DayStarted tick would otherwise have no simulated price to
+        /// read yet. Falling back to the native price (rather than 0 or throwing) keeps the price-gap
+        /// penalty a sane, always-computable number in that edge case instead of crashing or handing out a
+        /// nonsensical penalty based on a market price of zero.
+        ///
+        /// Deliberately does NOT affect AgreedPrice: that's still locked at signing time via
+        /// GetNativeSellPrice (SignContractAsHost) and never changes for the life of a contract - only the
+        /// "market price" used to judge how far a defaulted contract's agreed price has drifted uses the
+        /// simulated value.
         /// </summary>
         public int GetMarketPrice(string itemId)
         {
+            if (itemId == BeerItemId && BeerPriceHistory.Count > 0)
+            {
+                return BeerPriceHistory[BeerPriceHistory.Count - 1];
+            }
+
+            if (itemId == PaleAleItemId && PaleAlePriceHistory.Count > 0)
+            {
+                return PaleAlePriceHistory[PaleAlePriceHistory.Count - 1];
+            }
+
             return GetNativeSellPrice(itemId);
         }
 
@@ -663,7 +685,7 @@ namespace MyFirstMod
         /// <summary>Maximum number of days of price history kept per item (plan.md section 6) before the oldest entries are dropped, so the save file doesn't grow unbounded.</summary>
         public const int MaxPriceHistoryLength = 90;
 
-        /// <summary>Daily simulated price history for Beer (plan.md section 6), oldest first, capped at <see cref="MaxPriceHistoryLength"/> entries. Recorded for a future price chart; does not feed GetMarketPrice (see plan.md 6.6).</summary>
+        /// <summary>Daily simulated price history for Beer (plan.md section 6), oldest first, capped at <see cref="MaxPriceHistoryLength"/> entries. The last entry is also what GetMarketPrice returns (plan.md 6.6); the full history is kept for a future price chart, which doesn't exist yet.</summary>
         public List<int> BeerPriceHistory { get; } = new List<int>();
 
         /// <summary>Same as <see cref="BeerPriceHistory"/>, for Pale Ale.</summary>
@@ -678,8 +700,10 @@ namespace MyFirstMod
         /// Ale's call the same day - call order matters for both the sharing and for fixed-seed
         /// reproducibility (see PriceModelTests).
         ///
-        /// Deliberately separate from GetMarketPrice (plan.md 6.6): this only maintains price history for a
-        /// future chart. Intended to be called once per day from ModEntry's DayStarted handler.
+        /// Plan.md 6.6: this is what feeds GetMarketPrice - the entry appended here today is exactly what
+        /// GetMarketPrice will return for the rest of the day, until tomorrow's call appends the next one.
+        /// Intended to be called once per day from ModEntry's DayStarted handler, strictly before any
+        /// DayEnding settlement that day could read GetMarketPrice.
         /// </summary>
         public void UpdateDailyPrices(SDate today, Random rng)
         {
@@ -702,7 +726,7 @@ namespace MyFirstMod
             AppendPriceHistory(BeerPriceHistory, beerPrice);
             AppendPriceHistory(PaleAlePriceHistory, paleAlePrice);
 
-            monitor?.Log($"ContractManager: PriceModel daily update for {DateHelper.FormatChineseDate(today)} - beer={beerPrice}G paleAle={paleAlePrice}G (history only, not yet wired to GetMarketPrice - see plan.md 6.6).", LogLevel.Trace);
+            monitor?.Log($"ContractManager: PriceModel daily update for {DateHelper.FormatChineseDate(today)} - beer={beerPrice}G paleAle={paleAlePrice}G (now live via GetMarketPrice - see plan.md 6.6).", LogLevel.Trace);
 
             // Plan.md section 7 phase 4 ("全量同步"): unlike SettleDefaults, this runs unconditionally -
             // every call appends a fresh day's price to history, so there's always something new for other
