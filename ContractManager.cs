@@ -27,6 +27,7 @@ namespace MyFirstMod
 
         private readonly IMonitor monitor;
         private readonly IMultiplayerHelper multiplayerHelper;
+        private readonly ITranslationHelper translation;
 
         public List<FuturesContract> Contracts { get; } = new List<FuturesContract>();
 
@@ -77,10 +78,11 @@ namespace MyFirstMod
         /// </summary>
         public Dictionary<string, string> PendingDefaultMail { get; } = new Dictionary<string, string>();
 
-        public ContractManager(IMonitor monitor, IMultiplayerHelper multiplayerHelper)
+        public ContractManager(IMonitor monitor, IMultiplayerHelper multiplayerHelper, ITranslationHelper translation)
         {
             this.monitor = monitor;
             this.multiplayerHelper = multiplayerHelper;
+            this.translation = translation;
         }
 
         /// <summary>
@@ -120,7 +122,7 @@ namespace MyFirstMod
                 MultiplayerMessageTypes.ContractSigned,
                 playerIDs: null);
 
-            monitor?.Log($"ContractManager: [HOST] signed contract [{contract.ContractId}] for requester {requesterPlayerId}, item={itemId} price={agreedPrice}G due={DateHelper.FormatChineseDate(dueDate)}. Broadcast ContractSigned to all clients. Total contracts: {Contracts.Count}", LogLevel.Info);
+            monitor?.Log($"ContractManager: [HOST] signed contract [{contract.ContractId}] for requester {requesterPlayerId}, item={itemId} price={agreedPrice}G due={DateHelper.FormatContractDate(dueDate)}. Broadcast ContractSigned to all clients. Total contracts: {Contracts.Count}", LogLevel.Info);
         }
 
         /// <summary>
@@ -174,7 +176,7 @@ namespace MyFirstMod
             Contracts.Add(contract);
             SyncQuestGroupAfterSigning(contract);
 
-            monitor?.Log($"ContractManager: applied signed contract [{contract.ContractId}] item={contract.ItemId} price={contract.AgreedPrice}G due={DateHelper.FormatChineseDate(contract.DueDate)} to local state. Total contracts: {Contracts.Count}", LogLevel.Info);
+            monitor?.Log($"ContractManager: applied signed contract [{contract.ContractId}] item={contract.ItemId} price={contract.AgreedPrice}G due={DateHelper.FormatContractDate(contract.DueDate)} to local state. Total contracts: {Contracts.Count}", LogLevel.Info);
 
             ContractSignedApplied?.Invoke(contract);
         }
@@ -193,7 +195,7 @@ namespace MyFirstMod
             string groupQuestId = $"MyFirstMod.Futures.{contract.ItemId}.{contract.DueDate.DaysSinceStart}";
             contract.QuestId = groupQuestId;
             int countInGroup = CountPending(contract.ItemId, contract.DueDate);
-            string dateText = DateHelper.FormatChineseDate(contract.DueDate);
+            string dateText = DateHelper.FormatContractDate(contract.DueDate);
             string itemDisplayName = GetItemDisplayName(contract.ItemId);
 
             Quest quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == groupQuestId);
@@ -206,7 +208,7 @@ namespace MyFirstMod
                 Game1.player.questLog.Add(quest);
             }
 
-            quest.questTitle = $"{itemDisplayName}期货 - {dateText}交割";
+            quest.questTitle = translation.Get("quest.title", new { item = itemDisplayName, date = dateText }).ToString();
             quest.questDescription = BuildQuestDescription(itemDisplayName, dateText, countInGroup);
             quest.daysLeft.Value = Math.Max(0, contract.DueDate.DaysSinceStart - contract.SignedDate.DaysSinceStart);
         }
@@ -460,7 +462,7 @@ namespace MyFirstMod
 
             if (dueToday.Count > 0)
             {
-                monitor?.Log($"ContractManager: default settlement complete for {DateHelper.FormatChineseDate(today)} - {dueToday.Count} contract(s) defaulted.", LogLevel.Info);
+                monitor?.Log($"ContractManager: default settlement complete for {DateHelper.FormatContractDate(today)} - {dueToday.Count} contract(s) defaulted.", LogLevel.Info);
                 QueueDefaultMail(today, settlementRecords);
 
                 // Plan.md section 7 phase 4 ("全量同步"): broadcast the authoritative post-default state to
@@ -518,7 +520,7 @@ namespace MyFirstMod
         {
             List<string> lines = new List<string>
             {
-                $"{DateHelper.FormatChineseDate(dueDate)}期货违约通知",
+                translation.Get("mail.default-title", new { date = DateHelper.FormatContractDate(dueDate) }).ToString(),
                 ""
             };
 
@@ -533,9 +535,9 @@ namespace MyFirstMod
                 int groupNominalPenalty = group.Sum(r => r.PriceGapPenalty);
                 int groupMargin = group.Sum(r => r.Margin);
 
-                lines.Add($"{itemName} x{count}");
-                lines.Add($"  差价罚金：{groupNominalPenalty}G");
-                lines.Add($"  没收保证金：{groupMargin}G");
+                lines.Add(translation.Get("mail.item-group-header", new { item = itemName, count }).ToString());
+                lines.Add(translation.Get("mail.price-gap-penalty", new { amount = groupNominalPenalty }).ToString());
+                lines.Add(translation.Get("mail.margin-forfeited", new { amount = groupMargin }).ToString());
                 lines.Add("");
 
                 marginTotal += groupMargin;
@@ -548,17 +550,17 @@ namespace MyFirstMod
             // marginTotal again here would double-count the margin (this was correct under the old
             // direction, where actualDeductionTotal only ever held the price-gap portion - see plan.md 5.5).
             int nominalTotalOwed = marginTotal + nominalPenaltyTotal;
-            lines.Add($"合计扣款：{actualDeductionTotal}G");
+            lines.Add(translation.Get("mail.total-deducted", new { amount = actualDeductionTotal }).ToString());
             if (actualDeductionTotal < nominalTotalOwed)
             {
-                lines.Add($"（因金币不足，实际只扣除了{actualDeductionTotal}G，理论应扣{nominalTotalOwed}G）");
+                lines.Add(translation.Get("mail.insufficient-funds-note", new { actual = actualDeductionTotal, expected = nominalTotalOwed }).ToString());
             }
 
             string mailKey = $"MyFirstMod.Default.{dueDate.DaysSinceStart}";
             PendingDefaultMail[mailKey] = string.Join(SpriteText.newLine.ToString(), lines);
             Game1.addMailForTomorrow(mailKey);
 
-            monitor?.Log($"ContractManager: queued default-notice mail [{mailKey}] for due date {DateHelper.FormatChineseDate(dueDate)} - {records.Count} contract(s) across {records.Select(r => r.ItemId).Distinct().Count()} item(s), tallied loss {actualDeductionTotal}G.", LogLevel.Info);
+            monitor?.Log($"ContractManager: queued default-notice mail [{mailKey}] for due date {DateHelper.FormatContractDate(dueDate)} - {records.Count} contract(s) across {records.Select(r => r.ItemId).Distinct().Count()} item(s), tallied loss {actualDeductionTotal}G.", LogLevel.Info);
         }
 
         /// <summary>
@@ -576,7 +578,7 @@ namespace MyFirstMod
             {
                 if (remainingInGroup > 0)
                 {
-                    quest.questDescription = BuildQuestDescription(GetItemDisplayName(contract.ItemId), DateHelper.FormatChineseDate(contract.DueDate), remainingInGroup);
+                    quest.questDescription = BuildQuestDescription(GetItemDisplayName(contract.ItemId), DateHelper.FormatContractDate(contract.DueDate), remainingInGroup);
                 }
                 else
                 {
@@ -612,7 +614,7 @@ namespace MyFirstMod
                 string groupQuestId = $"MyFirstMod.Futures.{itemId}.{day}";
                 liveQuestIds.Add(groupQuestId);
 
-                string dateText = DateHelper.FormatChineseDate(first.DueDate);
+                string dateText = DateHelper.FormatContractDate(first.DueDate);
                 string itemDisplayName = GetItemDisplayName(itemId);
                 int count = group.Count();
 
@@ -627,7 +629,7 @@ namespace MyFirstMod
                     Game1.player.questLog.Add(quest);
                 }
 
-                quest.questTitle = $"{itemDisplayName}期货 - {dateText}交割";
+                quest.questTitle = translation.Get("quest.title", new { item = itemDisplayName, date = dateText }).ToString();
                 quest.questDescription = BuildQuestDescription(itemDisplayName, dateText, count);
             }
 
@@ -726,7 +728,7 @@ namespace MyFirstMod
             AppendPriceHistory(BeerPriceHistory, beerPrice);
             AppendPriceHistory(PaleAlePriceHistory, paleAlePrice);
 
-            monitor?.Log($"ContractManager: PriceModel daily update for {DateHelper.FormatChineseDate(today)} - beer={beerPrice}G paleAle={paleAlePrice}G (now live via GetMarketPrice - see plan.md 6.6).", LogLevel.Trace);
+            monitor?.Log($"ContractManager: PriceModel daily update for {DateHelper.FormatContractDate(today)} - beer={beerPrice}G paleAle={paleAlePrice}G (now live via GetMarketPrice - see plan.md 6.6).", LogLevel.Trace);
 
             // Plan.md section 7 phase 4 ("全量同步"): unlike SettleDefaults, this runs unconditionally -
             // every call appends a fresh day's price to history, so there's always something new for other
@@ -781,9 +783,9 @@ namespace MyFirstMod
             return ItemRegistry.Create("(O)" + itemId)?.DisplayName ?? itemId;
         }
 
-        private static string BuildQuestDescription(string itemDisplayName, string dateText, int count)
+        private string BuildQuestDescription(string itemDisplayName, string dateText, int count)
         {
-            return $"已与皮埃尔约定，需在{dateText}交割{itemDisplayName} x{count}";
+            return translation.Get("quest.description", new { item = itemDisplayName, date = dateText, count }).ToString();
         }
 
         /// <summary>Snapshots Contracts into the plain DTO shape Helper.Data.WriteSaveData expects, converting each SDate to its DaysSinceStart int.</summary>

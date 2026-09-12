@@ -35,6 +35,7 @@ namespace MyFirstMod
 
         private readonly IMonitor monitor;
         private readonly ContractManager contractManager;
+        private readonly ITranslationHelper translation;
         private readonly Item beerItem;
         private readonly Item paleAleItem;
         private readonly ClickableComponent beerRowComponent;
@@ -79,7 +80,7 @@ namespace MyFirstMod
         private int pendingDeliveryClickX;
         private int pendingDeliveryClickY;
 
-        public FuturesMenu(IMonitor monitor, ContractManager contractManager)
+        public FuturesMenu(IMonitor monitor, ContractManager contractManager, ITranslationHelper translation)
             : base(
                 Game1.uiViewport.Width / 2 - MenuWidth / 2,
                 Game1.uiViewport.Height / 2 - MenuHeight / 2,
@@ -89,6 +90,7 @@ namespace MyFirstMod
         {
             this.monitor = monitor;
             this.contractManager = contractManager;
+            this.translation = translation;
             this.beerItem = ItemRegistry.Create("(O)" + ContractManager.BeerItemId);
             this.paleAleItem = ItemRegistry.Create("(O)" + ContractManager.PaleAleItemId);
             this.dueDate = DateHelper.GetNextNextFriday();
@@ -177,7 +179,7 @@ namespace MyFirstMod
             string itemName = GetItemDisplayName(contract.ItemId);
             int countInGroup = contractManager.CountPending(contract.ItemId, contract.DueDate);
 
-            clickFeedbackText = $"签约成功：{itemName} x1 @ {contract.AgreedPrice}G，获得保证金{contract.Margin}G（同批已签{countInGroup}单）";
+            clickFeedbackText = translation.Get("signing.success", new { item = itemName, price = contract.AgreedPrice, margin = contract.Margin, count = countInGroup }).ToString();
             monitor?.Log($"FuturesMenu: contract [{contract.ContractId}] confirmed signed, cleared pending state.", LogLevel.Info);
         }
 
@@ -197,7 +199,7 @@ namespace MyFirstMod
             if (item == null)
             {
                 contractManager.ReportDeliverFailed(message.ContractId);
-                clickFeedbackText = "交割失败：物品已不在背包中";
+                clickFeedbackText = translation.Get("delivery.failed").ToString();
                 monitor?.Log($"FuturesMenu: approved delivery [{message.ContractId}] but item={pendingDeliveryItemId} is no longer in inventory - reported DeliverFailed.", LogLevel.Warn);
                 return;
             }
@@ -219,7 +221,7 @@ namespace MyFirstMod
             Game1.playSound("sell");
             SpawnDeliveryDebris(pendingDeliveryClickX, pendingDeliveryClickY);
 
-            clickFeedbackText = $"交割成功：{GetItemDisplayName(pendingDeliveryItemId)} @ {payout}G（合约价{message.AgreedPrice}G，已扣除签约时预付的保证金{margin}G）";
+            clickFeedbackText = translation.Get("delivery.success", new { item = GetItemDisplayName(pendingDeliveryItemId), payout, price = message.AgreedPrice, margin }).ToString();
             monitor?.Log($"FuturesMenu: delivered contract [{message.ContractId}] item={pendingDeliveryItemId} agreedPrice={message.AgreedPrice}G margin={margin}G payout={payout}G", LogLevel.Info);
         }
 
@@ -227,7 +229,7 @@ namespace MyFirstMod
         private void OnDeliverRejectedReceived(DeliverRejectedMessage message)
         {
             isPendingDeliveryRequest = false;
-            clickFeedbackText = "暂无可交割合约";
+            clickFeedbackText = translation.Get("delivery.rejected").ToString();
             monitor?.Log($"FuturesMenu: delivery request for item={message.ItemId} rejected by host ({message.Reason}).", LogLevel.Info);
         }
 
@@ -262,7 +264,7 @@ namespace MyFirstMod
             drawTextureBox(b, xPositionOnScreen, yPositionOnScreen, width, height, Color.White);
             DrawTabButtons(b);
 
-            string titleText = currentTab == Tab.TradeFutures ? "期货交易系统 - 测试中" : "当日交割";
+            string titleText = currentTab == Tab.TradeFutures ? translation.Get("menu.title-trade").ToString() : translation.Get("menu.tab-delivery").ToString();
             Vector2 titleSize = Game1.dialogueFont.MeasureString(titleText);
             Vector2 titlePosition = new Vector2(xPositionOnScreen + (width - titleSize.X) / 2f, yPositionOnScreen + 32);
             Utility.drawTextWithShadow(b, titleText, Game1.dialogueFont, titlePosition, Game1.textColor);
@@ -293,8 +295,8 @@ namespace MyFirstMod
 
         private void DrawTabButtons(SpriteBatch b)
         {
-            DrawTabButton(b, tradeTabComponent, "买卖期货", currentTab == Tab.TradeFutures);
-            DrawTabButton(b, deliveryTabComponent, "当日交割", currentTab == Tab.DailyDelivery);
+            DrawTabButton(b, tradeTabComponent, translation.Get("menu.tab-trade").ToString(), currentTab == Tab.TradeFutures);
+            DrawTabButton(b, deliveryTabComponent, translation.Get("menu.tab-delivery").ToString(), currentTab == Tab.DailyDelivery);
         }
 
         /// <summary>Mirrors vanilla GameMenu's raised-tab look: the active tab sits flush with the panel below it, inactive tabs are nudged down and dimmed.</summary>
@@ -329,7 +331,7 @@ namespace MyFirstMod
             Vector2 iconPosition = new Vector2(bounds.X + 16, bounds.Y + (bounds.Height - IconSlotSize) / 2f);
             beerItem?.drawInMenu(b, iconPosition, iconScale, 1f, 0.9f, StackDrawType.Hide);
 
-            string nameText = $"{beerItem?.DisplayName ?? "啤酒"} - {DateHelper.FormatChineseDate(dueDate)}交割";
+            string nameText = translation.Get("menu.row-name", new { item = beerItem?.DisplayName ?? translation.Get("item.beer").ToString(), date = DateHelper.FormatContractDate(dueDate) }).ToString();
             Vector2 namePosition = new Vector2(
                 bounds.X + 16 + IconSlotSize + 16,
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
@@ -357,7 +359,7 @@ namespace MyFirstMod
             Vector2 iconPosition = new Vector2(bounds.X + 16, bounds.Y + (bounds.Height - IconSlotSize) / 2f);
             paleAleItem?.drawInMenu(b, iconPosition, iconScale, 1f, 0.9f, StackDrawType.Hide);
 
-            string nameText = $"{paleAleItem?.DisplayName ?? "淡啤酒"} - {DateHelper.FormatChineseDate(dueDate)}交割";
+            string nameText = translation.Get("menu.row-name", new { item = paleAleItem?.DisplayName ?? translation.Get("item.pale-ale").ToString(), date = DateHelper.FormatContractDate(dueDate) }).ToString();
             Vector2 namePosition = new Vector2(
                 bounds.X + 16 + IconSlotSize + 16,
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
@@ -386,7 +388,8 @@ namespace MyFirstMod
             paleAleItem?.drawInMenu(b, iconPosition, iconScale, 1f, 0.9f, StackDrawType.Hide);
 
             SDate testDueDate = SDate.Now().AddDays(1);
-            string nameText = $"{paleAleItem?.DisplayName ?? "淡啤酒"} - {DateHelper.FormatChineseDate(testDueDate)}交割 (测试)";
+            string nameText = translation.Get("menu.row-name", new { item = paleAleItem?.DisplayName ?? translation.Get("item.pale-ale").ToString(), date = DateHelper.FormatContractDate(testDueDate) }).ToString()
+                + translation.Get("menu.test-suffix").ToString();
             Vector2 namePosition = new Vector2(
                 bounds.X + 16 + IconSlotSize + 16,
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
@@ -415,7 +418,8 @@ namespace MyFirstMod
             beerItem?.drawInMenu(b, iconPosition, iconScale, 1f, 0.9f, StackDrawType.Hide);
 
             SDate testDueDate = SDate.Now().AddDays(1);
-            string nameText = $"{beerItem?.DisplayName ?? "啤酒"} - {DateHelper.FormatChineseDate(testDueDate)}交割 (测试)";
+            string nameText = translation.Get("menu.row-name", new { item = beerItem?.DisplayName ?? translation.Get("item.beer").ToString(), date = DateHelper.FormatContractDate(testDueDate) }).ToString()
+                + translation.Get("menu.test-suffix").ToString();
             Vector2 namePosition = new Vector2(
                 bounds.X + 16 + IconSlotSize + 16,
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
@@ -452,7 +456,7 @@ namespace MyFirstMod
             if (rows.Count == 0)
             {
                 Vector2 emptyPosition = new Vector2(deliveryListBounds.X, deliveryListBounds.Y);
-                Utility.drawTextWithShadow(b, "暂无未结算合约", Game1.smallFont, emptyPosition, Game1.textColor);
+                Utility.drawTextWithShadow(b, translation.Get("menu.empty-delivery-list").ToString(), Game1.smallFont, emptyPosition, Game1.textColor);
             }
             else
             {
@@ -469,7 +473,7 @@ namespace MyFirstMod
 
                 if (rows.Count > visibleCount)
                 {
-                    string moreText = $"...还有{rows.Count - visibleCount}行未显示";
+                    string moreText = translation.Get("menu.more-rows-hidden", new { count = rows.Count - visibleCount }).ToString();
                     Vector2 morePosition = new Vector2(deliveryListBounds.X, deliveryListBounds.Y + visibleCount * DeliveryRowHeight);
                     Utility.drawTextWithShadow(b, moreText, Game1.smallFont, morePosition, Game1.textColor);
                 }
@@ -594,21 +598,21 @@ namespace MyFirstMod
             else if (row.CanDeliver)
             {
                 textColor = Color.DarkGreen;
-                statusSuffix = " 可交割";
+                statusSuffix = " " + translation.Get("menu.status-deliverable").ToString();
             }
             else
             {
                 textColor = Color.DarkRed;
-                statusSuffix = " 库存不足，排队等待";
+                statusSuffix = " " + translation.Get("menu.status-queued").ToString();
             }
 
-            string nameText = $"{icon.DisplayName} x{row.Count} @{row.AgreedPrice}G{statusSuffix}";
+            string nameText = translation.Get("menu.delivery-row-name", new { item = icon.DisplayName, count = row.Count, price = row.AgreedPrice, status = statusSuffix }).ToString();
             Vector2 namePosition = new Vector2(
                 bounds.X + 12 + IconSlotSize + 12,
                 bounds.Y + (bounds.Height - Game1.smallFont.MeasureString(nameText).Y) / 2f);
             Utility.drawTextWithShadow(b, nameText, Game1.smallFont, namePosition, textColor);
 
-            string dueText = $"{DateHelper.FormatChineseDate(row.DueDate)}到期";
+            string dueText = translation.Get("menu.due-date", new { date = DateHelper.FormatContractDate(row.DueDate) }).ToString();
             Vector2 dueSize = Game1.smallFont.MeasureString(dueText);
             Vector2 duePosition = new Vector2(bounds.Right - 16 - dueSize.X, bounds.Y + (bounds.Height - dueSize.Y) / 2f);
             Utility.drawTextWithShadow(b, dueText, Game1.smallFont, duePosition, textColor);
@@ -762,7 +766,7 @@ namespace MyFirstMod
             else
             {
                 isPendingSignRequest = true;
-                clickFeedbackText = $"已发送签约请求（{itemDisplayNameForFeedback}），等待房主确认...";
+                clickFeedbackText = translation.Get("signing.pending", new { item = itemDisplayNameForFeedback }).ToString();
                 contractManager.RequestSignContract(itemId, dueDateKind);
             }
         }
@@ -770,25 +774,27 @@ namespace MyFirstMod
         /// <summary>Beer row click: normal GetNextNextFriday() due date.</summary>
         private void SignBeerContract()
         {
-            SignContract(ContractManager.BeerItemId, ContractDueDateKind.NextNextFriday, "啤酒");
+            SignContract(ContractManager.BeerItemId, ContractDueDateKind.NextNextFriday, translation.Get("item.beer").ToString());
         }
 
         /// <summary>Pale Ale row click: normal GetNextNextFriday() due date.</summary>
         private void SignPaleAleContract()
         {
-            SignContract(ContractManager.PaleAleItemId, ContractDueDateKind.NextNextFriday, "淡啤酒");
+            SignContract(ContractManager.PaleAleItemId, ContractDueDateKind.NextNextFriday, translation.Get("item.pale-ale").ToString());
         }
 
         /// <summary>Test-only Pale Ale row click: due date is "signed day + 1" instead of GetNextNextFriday(), so a delivery can be tested the very next day.</summary>
         private void SignPaleAleTestContract()
         {
-            SignContract(ContractManager.PaleAleItemId, ContractDueDateKind.SignedDatePlusOneDay, "淡啤酒（测试）");
+            string itemName = translation.Get("item.pale-ale").ToString() + translation.Get("menu.test-suffix").ToString();
+            SignContract(ContractManager.PaleAleItemId, ContractDueDateKind.SignedDatePlusOneDay, itemName);
         }
 
         /// <summary>Test-only Beer row click: due date is "signed day + 1", same purpose as SignPaleAleTestContract - lets a same-night, multi-item default/delivery batch be tested.</summary>
         private void SignBeerTestContract()
         {
-            SignContract(ContractManager.BeerItemId, ContractDueDateKind.SignedDatePlusOneDay, "啤酒（测试）");
+            string itemName = translation.Get("item.beer").ToString() + translation.Get("menu.test-suffix").ToString();
+            SignContract(ContractManager.BeerItemId, ContractDueDateKind.SignedDatePlusOneDay, itemName);
         }
 
         /// <summary>
@@ -834,12 +840,12 @@ namespace MyFirstMod
                     Game1.playSound("sell");
                     SpawnDeliveryDebris(x, y);
 
-                    clickFeedbackText = $"交割成功：{GetItemDisplayName(item.ItemId)} @ {payout}G（合约价{agreedPrice}G，已扣除签约时预付的保证金{margin}G）";
+                    clickFeedbackText = translation.Get("delivery.success", new { item = GetItemDisplayName(item.ItemId), payout, price = agreedPrice, margin }).ToString();
                     monitor?.Log($"FuturesMenu: [HOST] delivered contract [{contractId}] item={item.ItemId} agreedPrice={agreedPrice}G margin={margin}G payout={payout}G", LogLevel.Info);
                 }
                 else
                 {
-                    clickFeedbackText = "暂无可交割合约";
+                    clickFeedbackText = translation.Get("delivery.rejected").ToString();
                 }
             }
             else
@@ -848,7 +854,7 @@ namespace MyFirstMod
                 pendingDeliveryItemId = item.ItemId;
                 pendingDeliveryClickX = x;
                 pendingDeliveryClickY = y;
-                clickFeedbackText = $"已发送交割请求（{GetItemDisplayName(item.ItemId)}），等待房主确认...";
+                clickFeedbackText = translation.Get("delivery.pending", new { item = GetItemDisplayName(item.ItemId) }).ToString();
                 contractManager.RequestDeliver(item.ItemId);
             }
         }

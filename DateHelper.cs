@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 
 namespace MyFirstMod
@@ -19,13 +19,14 @@ namespace MyFirstMod
     /// <summary>Date math helpers for futures contract due-date calculations.</summary>
     public static class DateHelper
     {
-        private static readonly Dictionary<string, string> SeasonNamesZh = new Dictionary<string, string>
-        {
-            ["spring"] = "春",
-            ["summer"] = "夏",
-            ["fall"] = "秋",
-            ["winter"] = "冬",
-        };
+        /// <summary>
+        /// Set once in ModEntry.Entry() (Helper.Translation). A static field rather than threading an
+        /// ITranslationHelper parameter through every FormatContractDate call site (there are around a
+        /// dozen, across ContractManager and FuturesMenu) - same pattern already used for
+        /// PierreShopPatch.Monitor/ContractManager, so existing callers don't need to change beyond the
+        /// FormatChineseDate -> FormatContractDate rename itself.
+        /// </summary>
+        public static ITranslationHelper Translation { get; set; }
 
         /// <summary>
         /// "下下周五"：从 <paramref name="from"/> 起，找到严格晚于它的下一个周五（"下周五"），
@@ -67,11 +68,31 @@ namespace MyFirstMod
             }
         }
 
-        /// <summary>Formats a date as "春28日" for Chinese UI text.</summary>
-        public static string FormatChineseDate(SDate date)
+        /// <summary>
+        /// Formats a contract-related date for player-facing text (quest titles/descriptions, the default
+        /// mail subject line, FuturesMenu's trade/delivery rows) - localized via the "date.spring"/
+        /// "date.summer"/"date.fall"/"date.winter" i18n keys, one per season, each combining that season's
+        /// name and word order with a "{{day}}" token in a single template (e.g. zh.json's "春{{day}}日" vs
+        /// default.json's "Spring {{day}}") - the structural difference between languages (suffix vs no
+        /// suffix, no space vs space) lives entirely in the JSON, not in this method, so adding another
+        /// locale later needs no code change here.
+        ///
+        /// Renamed from FormatChineseDate (previously hardcoded to the Chinese "春28日" layout only) - every
+        /// existing call site already just passes an SDate and uses the returned string as opaque display
+        /// text, so the rename didn't require changing any of them beyond the name itself.
+        /// </summary>
+        public static string FormatContractDate(SDate date)
         {
-            string seasonName = SeasonNamesZh.TryGetValue(date.SeasonKey, out string zh) ? zh : date.SeasonKey;
-            return $"{seasonName}{date.Day}日";
+            string key = date.SeasonKey switch
+            {
+                "spring" => "date.spring",
+                "summer" => "date.summer",
+                "fall" => "date.fall",
+                "winter" => "date.winter",
+                _ => "date.spring" // SDate.SeasonKey only ever returns one of the four canonical season keys.
+            };
+
+            return Translation.Get(key, new { day = date.Day }).ToString();
         }
     }
 }

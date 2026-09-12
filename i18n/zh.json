@@ -1,0 +1,44 @@
+{
+    "menu.tab-trade": "买卖期货",
+    "menu.tab-delivery": "当日交割",
+    "menu.title-trade": "期货交易系统 - 测试中",
+    "menu.row-name": "{{item}} - {{date}}交割",
+    "menu.test-suffix": " (测试)",
+    "menu.empty-delivery-list": "暂无未结算合约",
+    "menu.more-rows-hidden": "...还有{{count}}行未显示",
+    "menu.status-deliverable": "可交割",
+    "menu.status-queued": "库存不足，排队等待",
+    "menu.delivery-row-name": "{{item}} x{{count}} @{{price}}G{{status}}",
+    "menu.due-date": "{{date}}到期",
+
+    "item.beer": "啤酒",
+    "item.pale-ale": "淡啤酒",
+
+    "signing.success": "签约成功：{{item}} x1 @ {{price}}G，获得保证金{{margin}}G（同批已签{{count}}单）",
+    "signing.pending": "已发送签约请求（{{item}}），等待房主确认...",
+
+    "delivery.success": "交割成功：{{item}} @ {{payout}}G（合约价{{price}}G，已扣除签约时预付的保证金{{margin}}G）",
+    "delivery.failed": "交割失败：物品已不在背包中",
+    "delivery.rejected": "暂无可交割合约",
+    "delivery.pending": "已发送交割请求（{{item}}），等待房主确认...",
+
+    "quest.title": "{{item}}期货 - {{date}}交割",
+    "quest.description": "已与皮埃尔约定，需在{{date}}交割{{item}} x{{count}}",
+
+    "mail.default-title": "{{date}}期货违约通知",
+    "mail.item-group-header": "{{item}} x{{count}}",
+    "mail.price-gap-penalty": "  差价罚金：{{amount}}G",
+    "mail.margin-forfeited": "  没收保证金：{{amount}}G",
+    "mail.total-deducted": "合计扣款：{{amount}}G",
+    "mail.insufficient-funds-note": "（因金币不足，实际只扣除了{{actual}}G，理论应扣{{expected}}G）",
+
+    "shop.question": "你想做点什么？",
+    "shop.option-buy": "购买商品",
+    "shop.option-futures": "期货交易",
+    "shop.option-leave": "算了",
+
+    "date.spring": "春{{day}}日",
+    "date.summer": "夏{{day}}日",
+    "date.fall": "秋{{day}}日",
+    "date.winter": "冬{{day}}日"
+}

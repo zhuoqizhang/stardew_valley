@@ -1,0 +1,44 @@
+{
+    "menu.tab-trade": "Trade Futures",
+    "menu.tab-delivery": "Daily Delivery",
+    "menu.title-trade": "Futures Trading System - Testing",
+    "menu.row-name": "{{item}} - Settles {{date}}",
+    "menu.test-suffix": " (Test)",
+    "menu.empty-delivery-list": "No unsettled contracts",
+    "menu.more-rows-hidden": "...{{count}} more row(s) not shown",
+    "menu.status-deliverable": "Deliverable",
+    "menu.status-queued": "Insufficient stock, queued",
+    "menu.delivery-row-name": "{{item}} x{{count}} @{{price}}G{{status}}",
+    "menu.due-date": "Due {{date}}",
+
+    "item.beer": "Beer",
+    "item.pale-ale": "Pale Ale",
+
+    "signing.success": "Signed successfully: {{item}} x1 @ {{price}}G, received {{margin}}G margin ({{count}} in this batch)",
+    "signing.pending": "Sign request sent ({{item}}), waiting for host confirmation...",
+
+    "delivery.success": "Delivered successfully: {{item}} @ {{payout}}G (contract price {{price}}G, minus the {{margin}}G margin already paid at signing)",
+    "delivery.failed": "Delivery failed: item is no longer in your inventory",
+    "delivery.rejected": "No contract available to deliver",
+    "delivery.pending": "Delivery request sent ({{item}}), waiting for host confirmation...",
+
+    "quest.title": "{{item}} Futures - Settles {{date}}",
+    "quest.description": "Agreed with Pierre to deliver {{item}} x{{count}} on {{date}}",
+
+    "mail.default-title": "{{date}} Futures Default Notice",
+    "mail.item-group-header": "{{item}} x{{count}}",
+    "mail.price-gap-penalty": "  Price-gap penalty: {{amount}}G",
+    "mail.margin-forfeited": "  Margin forfeited: {{amount}}G",
+    "mail.total-deducted": "Total deducted: {{amount}}G",
+    "mail.insufficient-funds-note": "(Due to insufficient funds, only {{actual}}G was deducted; {{expected}}G was owed)",
+
+    "shop.question": "What would you like to do?",
+    "shop.option-buy": "Buy goods",
+    "shop.option-futures": "Futures trading",
+    "shop.option-leave": "Never mind",
+
+    "date.spring": "Spring {{day}}",
+    "date.summer": "Summer {{day}}",
+    "date.fall": "Fall {{day}}",
+    "date.winter": "Winter {{day}}"
+}

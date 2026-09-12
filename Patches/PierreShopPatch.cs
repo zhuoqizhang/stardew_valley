@@ -27,6 +27,7 @@ namespace MyFirstMod.Patches
 
         internal static IMonitor Monitor;
         internal static ContractManager ContractManager;
+        internal static ITranslationHelper Translation;
 
         // Guard against re-entrancy: choosing "Buy goods" re-calls TryOpenShopMenu so vanilla actually
         // opens the ShopMenu, which would otherwise trigger this same postfix again.
@@ -61,12 +62,12 @@ namespace MyFirstMod.Patches
             Game1.activeClickableMenu = null;
 
             location.createQuestionDialogue(
-                "你想做点什么？",
+                Translation.Get("shop.question").ToString(),
                 new[]
                 {
-                    new Response("Buy", "购买商品"),
-                    new Response("Futures", "期货交易"),
-                    new Response("Leave", "算了"),
+                    new Response("Buy", Translation.Get("shop.option-buy").ToString()),
+                    new Response("Futures", Translation.Get("shop.option-futures").ToString()),
+                    new Response("Leave", Translation.Get("shop.option-leave").ToString()),
                 },
                 (Farmer who, string whichAnswer) =>
                 {
@@ -85,7 +86,7 @@ namespace MyFirstMod.Patches
                             break;
 
                         case "Futures":
-                            Game1.activeClickableMenu = new FuturesMenu(Monitor, ContractManager);
+                            Game1.activeClickableMenu = new FuturesMenu(Monitor, ContractManager, Translation);
                             break;
                     }
                 });

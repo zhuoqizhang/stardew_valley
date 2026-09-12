@@ -24,7 +24,9 @@ namespace MyFirstMod
 
         public override void Entry(IModHelper helper)
         {
-            contractManager = new ContractManager(Monitor, helper.Multiplayer);
+            DateHelper.Translation = helper.Translation;
+
+            contractManager = new ContractManager(Monitor, helper.Multiplayer, helper.Translation);
             helper.Events.Input.ButtonPressed += OnButtonPressed;
             helper.Events.GameLoop.Saving += OnSaving;
             helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
@@ -36,6 +38,7 @@ namespace MyFirstMod
 
             PierreShopPatch.Monitor = Monitor;
             PierreShopPatch.ContractManager = contractManager;
+            PierreShopPatch.Translation = helper.Translation;
             try
             {
                 Harmony harmony = new Harmony(ModManifest.UniqueID);
@@ -58,7 +61,7 @@ namespace MyFirstMod
             {
                 if (Game1.activeClickableMenu == null)
                 {
-                    Game1.activeClickableMenu = new FuturesMenu(Monitor, contractManager);
+                    Game1.activeClickableMenu = new FuturesMenu(Monitor, contractManager, Helper.Translation);
                 }
                 return;
             }
@@ -134,7 +137,7 @@ namespace MyFirstMod
             Monitor.Log($"[DIAG] SaveLoaded: ContractManager.Contracts has {contractManager.Contracts.Count} entrie(s):", LogLevel.Info);
             foreach (FuturesContract contract in contractManager.Contracts)
             {
-                Monitor.Log($"[DIAG]   contract id={contract.ContractId} item={contract.ItemId} price={contract.AgreedPrice}G due={DateHelper.FormatChineseDate(contract.DueDate)} status={contract.Status} quest={contract.QuestId}", LogLevel.Info);
+                Monitor.Log($"[DIAG]   contract id={contract.ContractId} item={contract.ItemId} price={contract.AgreedPrice}G due={DateHelper.FormatContractDate(contract.DueDate)} status={contract.Status} quest={contract.QuestId}", LogLevel.Info);
             }
 
             if (futuresQuests.Count > 0 && contractManager.Contracts.Count < futuresQuests.Count)
